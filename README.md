@@ -6,13 +6,13 @@ An implementation of Deepmind's visual interaction networks in Pytorch.
 [Watters, N., Tacchetti, A., Weber, T., Pascanu, R., Battaglia, P.W., & Zoran, D. (2017). Visual Interaction Networks. CoRR, abs/1706.01433.](https://arxiv.org/abs/1706.01433)
 <div align="center">
 
-<img align="center" hight="256" width="128" src="file://figures/VIN-example.gif">
+<img align="center" hight="512" width="256" src="https://github.com/stelzner/Visual-Interaction-Networks/blob/master/figures/VIN-example.gif?raw=true">
 </div>
 
 
 ## Architecture
 <div align="center">
-<img hight="600" width="600" src="https://github.com/Mrgemy95/visual-interaction-networks-pytorch/blob/master/figures/2.png?raw=true">
+<img hight="600" width="600" src="https://github.com/stelzner/Visual-Interaction-Networks/blob/master/figures/2.png?raw=true">
 </div>
 
 

@@ -9,7 +9,7 @@ class VinConfig:
 
     # Model/training config
     visual = True  # If False, use states as input instead of images
-    load = True  # Load parameters from checkpoint file
+    load = False  # Load parameters from checkpoint file
     num_visible = 6  # Number of visible frames
     num_rollout = 8  # Number of rollout frames
     frame_step = 1  # Stepsize when observing frames

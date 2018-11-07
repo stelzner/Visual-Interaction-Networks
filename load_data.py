@@ -59,19 +59,33 @@ class VinDataset(Dataset):
         self.total_img = np.transpose(self.total_img, (0, 1, 4, 2, 3))
         self.total_data = data['y'][:config.num_episodes]
 
-        self.images, self.present_labels, self.future_labels = \
-            clips_from_episodes(self.total_img,
-                                self.total_data,
-                                config.num_visible,
-                                config.num_rollout,
-                                config.frame_step)
+        num_eps, num_frames = self.total_img.shape[0:2]
+        clips_per_ep = num_frames - ((config.num_visible +
+                                     config.num_rollout) *
+                                     config.frame_step) + 1
+
+        idx_ep, idx_fr = np.meshgrid(list(range(num_eps)),
+                                     list(range(clips_per_ep)))
+
+        self.idxs = np.reshape(np.stack([idx_ep, idx_fr], 2), (-1, 2))
 
     def __len__(self):
-        return len(self.images)
+        return len(self.idxs)
 
     def __getitem__(self, idx):
-        sample = {'image': torch.from_numpy(self.images[idx]),
-                  'future_labels': torch.from_numpy(self.future_labels[idx]),
-                  'present_labels': torch.from_numpy(self.present_labels[idx])}
+        conf = self.config
+        step = conf.frame_step
+
+        i, j = self.idxs[idx, 0], self.idxs[idx, 1]
+
+        end_visible = j + conf.num_visible * step
+        end_rollout = end_visible + conf.num_rollout * step
+        image = self.total_img[i, j:end_visible:step]
+        present = self.total_data[i, j + 2 * step:end_visible:step]
+        future = self.total_data[i, end_visible:end_rollout:step]
+
+        sample = {'image': torch.from_numpy(image),
+                  'future_labels': torch.from_numpy(future),
+                  'present_labels': torch.from_numpy(present)}
 
         return sample

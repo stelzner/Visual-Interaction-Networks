@@ -20,17 +20,16 @@ An implementation of Deepmind's visual interaction networks in Pytorch.
 Run create_billards_data.py to create a dataset of bouncing billard balls, or supply your own data.
 
 ### Dependencies
-Required packages:
+Dependencies can be installed using `pip install -r requirements.txt`. They consist of the following required packages
 ``` 
 Python 3.6
 pytorch 0.4
 numpy 1.15
 scipy 1.1
 ```
-
-Optional packages for visualization:
+as well as these optional packages for visualization:
 ```
-matploglib 3.0
+matplotlib 3.0
 visdom 0.1
 imageio 2.4
 ```
@@ -46,6 +45,6 @@ This repository was primarily created by refactoring and fixing
 
 Indirect sources include:
 * https://github.com/jaesik817/visual-interaction-networks_tensorflow
-* Ilya Sutskever for the [billard data code](http://www.cs.utoronto.ca/~ilya/code/2008/RTRBM.tar)
+* Ilya Sutskever's code for the [billard data](http://www.cs.utoronto.ca/~ilya/code/2008/RTRBM.tar)
 
 

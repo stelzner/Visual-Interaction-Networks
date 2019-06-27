@@ -43,8 +43,6 @@ def clips_from_episodes(images, labels, visible_l, rollout_l, step):
 
 
 class VinDataset(Dataset):
-    """Face Landmarks dataset."""
-
     def __init__(self, config, transform=None, test=False):
         self.config = config
         self.transform = transform
@@ -58,6 +56,8 @@ class VinDataset(Dataset):
         # Transpose, as PyTorch images have shape (c, h, w)
         self.total_img = np.transpose(self.total_img, (0, 1, 4, 2, 3))
         self.total_data = data['y'][:config.num_episodes]
+        self.total_data[..., :2] /= 10
+        self.total_data[..., 2:] *= 2
 
         num_eps, num_frames = self.total_img.shape[0:2]
         clips_per_ep = num_frames - ((config.num_visible +

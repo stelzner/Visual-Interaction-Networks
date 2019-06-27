@@ -13,8 +13,8 @@ def plot_positions(xy, img_folder, prefix, save=True, size=10):
     fig_num = len(xy)
     mydpi = 100
     fig = plt.figure(figsize=(128/mydpi, 128/mydpi))
-    plt.xlim(0, 10)
-    plt.ylim(0, 10)
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
     plt.xticks([])
     plt.yticks([])
 

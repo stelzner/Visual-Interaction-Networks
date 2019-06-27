@@ -8,14 +8,15 @@ class VinConfig:
     log_dir = "./log"
 
     # Model/training config
-    visual = True  # If False, use states as input instead of images
+    num_epochs = 1
+    visual = False  # If False, use states as input instead of images
     load = False  # Load parameters from checkpoint file
     num_visible = 6  # Number of visible frames
     num_rollout = 8  # Number of rollout frames
     frame_step = 1  # Stepsize when observing frames
-    batch_size = 100
+    batch_size = 128
     cl = 16  # state code length per object
-    discount_factor = 0.9  # discount factor for loss from rollouts
+    discount_factor = 0.98  # discount factor for loss from rollouts
 
     # Data config
     num_episodes = 1000  # The number of episodes

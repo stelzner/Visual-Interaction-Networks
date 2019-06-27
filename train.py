@@ -21,7 +21,7 @@ class Trainer:
         self.dataloader = DataLoader(train_dataset,
                                      batch_size=self.config.batch_size,
                                      shuffle=True,
-                                     num_workers=4,
+                                     num_workers=0,
                                      drop_last=True)
 
         self.test_dataset = VinDataset(self.config,
@@ -29,7 +29,7 @@ class Trainer:
         self.test_dataloader = DataLoader(self.test_dataset,
                                           batch_size=self.config.batch_size,
                                           shuffle=True,
-                                          num_workers=4,
+                                          num_workers=0,
                                           drop_last=True)
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=0.0005)
@@ -65,7 +65,7 @@ class Trainer:
     def train(self):
         step_counter = 0
         num_rollout = self.config.num_rollout
-        for epoch in range(100):
+        for epoch in range(self.config.num_epochs):
             print("testing................")
             self.test()
             for i, data in enumerate(self.dataloader, 0):
@@ -103,8 +103,8 @@ class Trainer:
                                                            pred_loss.item()))
                 # Draw example
                 if step_counter % 200 == 0:
-                    real = torch.cat([present_labels[0], future_labels[0]])
-                    simu = torch.cat([state_recon[0], state_pred[0]]).detach()
+                    real = torch.cat([present_labels[0], future_labels[0]]).cpu().numpy()
+                    simu = torch.cat([state_recon[0], state_pred[0]]).detach().cpu().numpy()
                     plot_positions(real, self.config.img_folder, 'real')
                     plot_positions(simu, self.config.img_folder, 'rollout')
                 # Save parameters

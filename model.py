@@ -32,40 +32,52 @@ class Net(nn.Module):
         self.self_cores = nn.ModuleList()
         for i in range(3):
             self.self_cores.append(nn.ModuleList())
-            self.self_cores[i].append(nn.Linear(cl, cl).double().cuda())
-            self.self_cores[i].append(nn.Linear(cl, cl).double().cuda())
+            self.self_cores[i].append(nn.Linear(cl, cl))
+            self.self_cores[i].append(nn.Linear(cl, cl))
 
         # Relation MLP
         self.rel_cores = nn.ModuleList()
         for i in range(3):
             self.rel_cores.append(nn.ModuleList())
-            self.rel_cores[i].append(nn.Linear(cl * 2, 2 * cl).double().cuda())
-            self.rel_cores[i].append(nn.Linear(2 * cl, cl).double().cuda())
-            self.rel_cores[i].append(nn.Linear(cl, cl).double().cuda())
+            self.rel_cores[i].append(nn.Linear(1 + cl * 2, 2 * cl))
+            self.rel_cores[i].append(nn.Linear(2 * cl, cl))
+            self.rel_cores[i].append(nn.Linear(cl, cl))
+
+        # Attention MLP
+        self.att_net = nn.ModuleList()
+        for i in range(3):
+            self.att_net.append(nn.ModuleList())
+            self.att_net[i].append(nn.Linear(1 + cl * 2, 2 * cl))
+            self.att_net[i].append(nn.Linear(2 * cl, cl))
+            self.att_net[i].append(nn.Linear(cl, 1))
 
         # Affector MLP
         self.affector = nn.ModuleList()
         for i in range(3):
             self.affector.append(nn.ModuleList())
-            self.affector[i].append(nn.Linear(cl, cl).double().cuda())
-            self.affector[i].append(nn.Linear(cl, cl).double().cuda())
-            self.affector[i].append(nn.Linear(cl, cl).double().cuda())
+            self.affector[i].append(nn.Linear(cl, cl))
+            self.affector[i].append(nn.Linear(cl, cl))
+            self.affector[i].append(nn.Linear(cl, cl))
 
         # Core output MLP
         self.out = nn.ModuleList()
         for i in range(3):
             self.out.append(nn.ModuleList())
-            self.out[i].append(nn.Linear(cl + cl, cl).double().cuda())
-            self.out[i].append(nn.Linear(cl, cl).double().cuda())
+            self.out[i].append(nn.Linear(cl + cl, cl))
+            self.out[i].append(nn.Linear(cl, cl))
 
         # Aggregator MLP for aggregating core predictions
         self.aggregator1 = nn.Linear(cl * 3, cl)
         self.aggregator2 = nn.Linear(cl, cl)
 
+        self.diag_mask = 1 - torch.eye(self.config.num_obj).unsqueeze(2).unsqueeze(0).cuda().double()
         # decoder mapping state codes to actual states
         self.state_decoder = nn.Linear(cl, 4)
         # encoder for the non-visual case
         self.state_encoder = nn.Linear(4, cl)
+
+        self.log_delta_t = torch.nn.parameter.Parameter(torch.Tensor(3))
+        self.log_delta_t.data.fill_(0.)
 
     def construct_coord_dims(self):
         """
@@ -89,39 +101,45 @@ class Net(nn.Module):
         :param core_idx: The index of the set of parameters to apply (0, 1, 2)
         :return: Prediction of a future state code (n, o, cl)
         """
-        objects = [s[:, i] for i in range(3)]
-
         self_sd_h1 = F.relu(self.self_cores[core_idx][0](s))
         self_dynamic = self.self_cores[core_idx][1](self_sd_h1) + self_sd_h1
 
-        rel_combination = []
-        for i in range(6):
-            row_idx = i // 2
-            # pick the two other objects
-            col_idx = (row_idx + 1 + (i % 2)) % 3
-            rel_combination.append(
-                torch.cat([objects[row_idx], objects[col_idx]], 1))
-        # 6 combinations of the 3 objects, (n, 6, 2*cl)
-        rel_combination = torch.stack(rel_combination, 1)
-        rel_sd_h1 = F.relu(self.rel_cores[core_idx][0](rel_combination))
+        object_arg1 = s.unsqueeze(2).repeat(1, 1, self.config.num_obj, 1)
+        object_arg2 = s.unsqueeze(1).repeat(1, self.config.num_obj, 1, 1)
+        distances = (object_arg1[..., 0] - object_arg2[..., 0])**2 +\
+                    (object_arg1[..., 1] - object_arg2[..., 1])**2
+        distances = distances.unsqueeze(-1)
+        combinations = torch.cat((object_arg1, object_arg2, distances), 3)
+        rel_sd_h1 = F.relu(self.rel_cores[core_idx][0](combinations))
         rel_sd_h2 = F.relu(self.rel_cores[core_idx][1](rel_sd_h1))
         rel_factors = self.rel_cores[core_idx][2](rel_sd_h2) + rel_sd_h2
-        obj1 = rel_factors[:, 0] + rel_factors[:, 1]
-        obj2 = rel_factors[:, 2] + rel_factors[:, 3]
-        obj3 = rel_factors[:, 4] + rel_factors[:, 5]
+
+        attention = F.relu(self.att_net[core_idx][0](combinations))
+        attention = F.relu(self.att_net[core_idx][1](attention))
+        attention = torch.exp(self.att_net[core_idx][2](attention))
+
+        # mask out object interacting with itself
+        rel_factors *= self.diag_mask * attention
         # relational dynamics per object, (n, o, cl)
-        rel_dynamic = torch.stack([obj1, obj2, obj3], 1)
-        # total dynamics
+
+        rel_dynamic = torch.sum(rel_factors, 2)
+
         dynamic_pred = self_dynamic + rel_dynamic
 
-        aff1 = F.relu(self.affector[core_idx][0](dynamic_pred))
-        aff2 = F.relu(self.affector[core_idx][1](aff1) + aff1)
+        aff1 = torch.tanh(self.affector[core_idx][0](dynamic_pred))
+        aff2 = torch.tanh(self.affector[core_idx][1](aff1)) + aff1
         aff3 = self.affector[core_idx][2](aff2)
 
+        # new_s = s[..., 2:] + aff3[..., 2:]
+        # new_pos = s[..., :2] + new_s[..., :2] * torch.exp(self.log_delta_t[core_idx])
+        # result = torch.cat((new_pos, new_s), 2)
+        # result = s + aff3
+
         aff_s = torch.cat([aff3, s], 2)
-        out1 = F.relu(self.out[core_idx][0](aff_s))
-        out2 = self.out[core_idx][1](out1) + out1
-        return out2
+        out1 = torch.tanh(self.out[core_idx][0](aff_s))
+        result = self.out[core_idx][1](out1) + out1
+        result[..., :2] += s[..., :2]
+        return result
 
     def frames_to_states(self, frames):
         """
@@ -189,27 +207,30 @@ class Net(nn.Module):
                  present_states: predicted states at the time of
                                  the given observations, (n, 4, o, 4)
         """
+        # for i in range(4):
+        #     print(i, x[:, :, :, i].min(), x[:, :, :, i].max())
         # get encoded states
         if visual:
             state_codes = self.frames_to_states(x)
         else:
             state_codes = self.state_encoder(x)
+            state_codes[..., :4] = x
         # the 4 state codes (n, o, cl)
         s1, s2, s3, s4 = [state_codes[:, i] for i in range(4)]
         rollouts = []
         for i in range(num_rollout):
             # use cores to predict next state using delta_t = 1, 2, 4
             c1 = self.core(s4, 0)
-            c2 = self.core(s3, 1)
-            c4 = self.core(s1, 2)
-            all_c = torch.cat([c1, c2, c4], 2)
-            aggregator1 = F.relu(self.aggregator1(all_c))
-            state_prediction = self.aggregator2(aggregator1)
+            # c2 = self.core(s3, 1)
+            # c4 = self.core(s1, 2)
+            # all_c = torch.cat([c1, c2, c4], 2)
+            # aggregator1 = F.relu(self.aggregator1(all_c))
+            state_prediction = c1  # self.aggregator2(aggregator1)
             rollouts.append(state_prediction)
             s1, s2, s3, s4 = s2, s3, s4, state_prediction
         rollouts = torch.stack(rollouts, 1)
 
-        present_states = self.state_decoder(state_codes)
-        rollout_states = self.state_decoder(rollouts)
+        present_states = state_codes[..., :4]
+        rollout_states = rollouts[..., :4]
 
         return rollout_states, present_states

@@ -56,8 +56,20 @@ class VinDataset(Dataset):
         # Transpose, as PyTorch images have shape (c, h, w)
         self.total_img = np.transpose(self.total_img, (0, 1, 4, 2, 3))
         self.total_data = data['y'][:config.num_episodes]
+        print(self.total_data.shape)
         self.total_data[..., :2] /= 10
-        self.total_data[..., 2:] *= 2
+        if config.train_with_v:
+            self.total_data[..., 2:] *= 2
+        else:
+            # Approximate velocities with position delta
+            self.total_data[:, :-1, :, 2:] = 10 * (self.total_data[:, 1:, :, :2] - self.total_data[:, :-1, :, :2])
+
+            print('pos stats', self.total_data[..., :2].min(),self.total_data[..., :2].max())
+            print('v stats', self.total_data[..., 2:].min(),self.total_data[..., 2:].max())
+            # cut off last observation, since we can't estimate v there
+            self.total_data = self.total_data[:, :-1]
+            self.total_img = self.total_img[:, :-1]
+
 
         num_eps, num_frames = self.total_img.shape[0:2]
         clips_per_ep = num_frames - ((config.num_visible +

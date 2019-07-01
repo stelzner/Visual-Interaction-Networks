@@ -21,7 +21,7 @@ class Trainer:
         self.dataloader = DataLoader(train_dataset,
                                      batch_size=self.config.batch_size,
                                      shuffle=True,
-                                     num_workers=0,
+                                     num_workers=4,
                                      drop_last=True)
 
         self.test_dataset = VinDataset(self.config,
@@ -29,7 +29,7 @@ class Trainer:
         self.test_dataloader = DataLoader(self.test_dataset,
                                           batch_size=self.config.batch_size,
                                           shuffle=True,
-                                          num_workers=0,
+                                          num_workers=4,
                                           drop_last=True)
 
         self.optimizer = optim.Adam(self.net.parameters(), lr=0.0005)
@@ -50,17 +50,25 @@ class Trainer:
             print('Loading parameters failed, training from scratch...')
 
     def compute_loss(self, present_labels, future_labels, recons, preds):
+        delta_xy_labels = future_labels[:, 1:] - future_labels[:, :-1]
+        delta_xy_preds = preds[:, 1:] - preds[:, :-1]
         loss = nn.MSELoss()
         df = self.config.discount_factor
         pred_loss = 0.0
+        delta_pred_loss = 0.0
+        cur_df = 1.
         for delta_t in range(0, self.config.num_rollout):
-            pred_loss += (df ** (delta_t + 1)) * \
+            pred_loss += cur_df * \
                 loss(preds[:, delta_t], future_labels[:, delta_t])
+            if delta_t < self.config.num_rollout - 1:
+                delta_pred_loss += cur_df * 10 * loss(delta_xy_preds[:, delta_t],
+                                                      delta_xy_labels[:, delta_t])
+            cur_df *= df
 
         recon_loss = loss(recons, present_labels)
-        total_loss = pred_loss + recon_loss
+        total_loss = pred_loss + recon_loss + delta_pred_loss
 
-        return total_loss, pred_loss, recon_loss
+        return total_loss, pred_loss, recon_loss, delta_pred_loss
 
     def train(self):
         step_counter = 0
@@ -88,7 +96,7 @@ class Trainer:
                                                    num_rollout=num_rollout,
                                                    visual=self.config.visual)
 
-                total_loss, pred_loss, recon_loss = \
+                total_loss, pred_loss, recon_loss, delta_pred_loss = \
                     self.compute_loss(present_labels, future_labels,
                                       state_recon, state_pred)
 
@@ -97,10 +105,11 @@ class Trainer:
 
                 # print loss
                 if step_counter % 20 == 0:
-                    print('{:5d} {:5f} {:5f} {:5f}'.format(step_counter,
-                                                           total_loss.item(),
-                                                           recon_loss.item(),
-                                                           pred_loss.item()))
+                    print('{:5d} {:5f} {:5f} {:5f} {:5f}'.format(step_counter,
+                                                                 total_loss.item(),
+                                                                 recon_loss.item(),
+                                                                 pred_loss.item(),
+                                                                 delta_pred_loss.item()))
                 # Draw example
                 if step_counter % 200 == 0:
                     real = torch.cat([present_labels[0], future_labels[0]]).cpu().numpy()
@@ -130,7 +139,7 @@ class Trainer:
                                    num_rollout=self.config.num_rollout,
                                    visual=self.config.visual)
 
-            total_loss, pred_loss, recon_loss = \
+            total_loss, pred_loss, recon_loss, delta_pred_loss = \
                 self.compute_loss(present_labels, future_labels,
                                   recon, pred)
 

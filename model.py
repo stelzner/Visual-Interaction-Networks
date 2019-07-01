@@ -4,6 +4,8 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 
+import math
+
 
 class Net(nn.Module):
     def __init__(self, config):
@@ -30,30 +32,30 @@ class Net(nn.Module):
         # Interaction Net Core Modules
         # Self-dynamics MLP
         self.self_cores = nn.ModuleList()
-        for i in range(3):
+        for i in range(1):
             self.self_cores.append(nn.ModuleList())
             self.self_cores[i].append(nn.Linear(cl, cl))
             self.self_cores[i].append(nn.Linear(cl, cl))
 
         # Relation MLP
         self.rel_cores = nn.ModuleList()
-        for i in range(3):
+        for i in range(1):
             self.rel_cores.append(nn.ModuleList())
-            self.rel_cores[i].append(nn.Linear(1 + cl * 2, 2 * cl))
+            self.rel_cores[i].append(nn.Linear(3 + cl * 2, 2 * cl))
             self.rel_cores[i].append(nn.Linear(2 * cl, cl))
             self.rel_cores[i].append(nn.Linear(cl, cl))
 
         # Attention MLP
         self.att_net = nn.ModuleList()
-        for i in range(3):
+        for i in range(1):
             self.att_net.append(nn.ModuleList())
-            self.att_net[i].append(nn.Linear(1 + cl * 2, 2 * cl))
+            self.att_net[i].append(nn.Linear(3 + cl * 2, 2 * cl))
             self.att_net[i].append(nn.Linear(2 * cl, cl))
             self.att_net[i].append(nn.Linear(cl, 1))
 
         # Affector MLP
         self.affector = nn.ModuleList()
-        for i in range(3):
+        for i in range(1):
             self.affector.append(nn.ModuleList())
             self.affector[i].append(nn.Linear(cl, cl))
             self.affector[i].append(nn.Linear(cl, cl))
@@ -61,7 +63,7 @@ class Net(nn.Module):
 
         # Core output MLP
         self.out = nn.ModuleList()
-        for i in range(3):
+        for i in range(1):
             self.out.append(nn.ModuleList())
             self.out[i].append(nn.Linear(cl + cl, cl))
             self.out[i].append(nn.Linear(cl, cl))
@@ -72,12 +74,9 @@ class Net(nn.Module):
 
         self.diag_mask = 1 - torch.eye(self.config.num_obj).unsqueeze(2).unsqueeze(0).cuda().double()
         # decoder mapping state codes to actual states
-        self.state_decoder = nn.Linear(cl, 4)
+        # self.state_decoder = nn.Linear(cl, 4)
         # encoder for the non-visual case
         self.state_encoder = nn.Linear(4, cl)
-
-        self.log_delta_t = torch.nn.parameter.Parameter(torch.Tensor(3))
-        self.log_delta_t.data.fill_(0.)
 
     def construct_coord_dims(self):
         """
@@ -106,19 +105,24 @@ class Net(nn.Module):
 
         object_arg1 = s.unsqueeze(2).repeat(1, 1, self.config.num_obj, 1)
         object_arg2 = s.unsqueeze(1).repeat(1, self.config.num_obj, 1, 1)
-        distances = (object_arg1[..., 0] - object_arg2[..., 0])**2 +\
-                    (object_arg1[..., 1] - object_arg2[..., 1])**2
-        distances = distances.unsqueeze(-1)
-        combinations = torch.cat((object_arg1, object_arg2, distances), 3)
+        distances = (object_arg1[..., :2] - object_arg2[..., :2])**2
+        distances = torch.sum(distances, -1, keepdim=True) + 1e-10
+        distances = torch.sqrt(distances)
+        delta_xy = object_arg1[..., :2] - object_arg2[..., :2]
+        # thetas = torch.atan(delta_xy[..., 1] / (delta_xy[..., 0] + 1e-10))
+        # thetas += math.pi * ((torch.sign(delta_xy[..., 0]) + 1) / 2)
+        # thetas = thetas.unsqueeze(-1)
+        # thetas = torch.zeros_like(thetas)
+        combinations = torch.cat((object_arg1, object_arg2, distances, delta_xy), 3)
         rel_sd_h1 = F.relu(self.rel_cores[core_idx][0](combinations))
         rel_sd_h2 = F.relu(self.rel_cores[core_idx][1](rel_sd_h1))
         rel_factors = self.rel_cores[core_idx][2](rel_sd_h2) + rel_sd_h2
 
-        attention = F.relu(self.att_net[core_idx][0](combinations))
-        attention = F.relu(self.att_net[core_idx][1](attention))
+        attention = torch.tanh(self.att_net[core_idx][0](combinations))
+        attention = torch.tanh(self.att_net[core_idx][1](attention))
         attention = torch.exp(self.att_net[core_idx][2](attention))
 
-        # mask out object interacting with itself
+        # mask out objects interacting with itself, and apply attention
         rel_factors *= self.diag_mask * attention
         # relational dynamics per object, (n, o, cl)
 
@@ -207,30 +211,30 @@ class Net(nn.Module):
                  present_states: predicted states at the time of
                                  the given observations, (n, 4, o, 4)
         """
-        # for i in range(4):
-        #     print(i, x[:, :, :, i].min(), x[:, :, :, i].max())
-        # get encoded states
         if visual:
             state_codes = self.frames_to_states(x)
         else:
-            state_codes = self.state_encoder(x)
-            state_codes[..., :4] = x
+            latent_codes = self.state_encoder(x)[..., 4:]
+            state_codes = torch.cat((x, latent_codes), -1)
+
+        present_states = state_codes[..., :4]
         # the 4 state codes (n, o, cl)
-        s1, s2, s3, s4 = [state_codes[:, i] for i in range(4)]
+        # s1, s2, s3, s4 = [state_codes[:, i] for i in range(4)]
+        cur_state_code = state_codes[:, -1]
         rollouts = []
         for i in range(num_rollout):
             # use cores to predict next state using delta_t = 1, 2, 4
-            c1 = self.core(s4, 0)
+            c1 = self.core(cur_state_code, 0)
             # c2 = self.core(s3, 1)
             # c4 = self.core(s1, 2)
             # all_c = torch.cat([c1, c2, c4], 2)
             # aggregator1 = F.relu(self.aggregator1(all_c))
             state_prediction = c1  # self.aggregator2(aggregator1)
             rollouts.append(state_prediction)
-            s1, s2, s3, s4 = s2, s3, s4, state_prediction
+            # s1, s2, s3, s4 = s2, s3, s4, state_prediction
+            cur_state_code = state_prediction
         rollouts = torch.stack(rollouts, 1)
 
-        present_states = state_codes[..., :4]
         rollout_states = rollouts[..., :4]
 
         return rollout_states, present_states

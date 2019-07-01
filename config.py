@@ -9,7 +9,7 @@ class VinConfig:
 
     # Model config
     visual = False  # If False, use states as input instead of images
-    discount_factor = 0.98  # discount factor for loss from rollouts
+    discount_factor = 0.995  # discount factor for loss from rollouts
     num_visible = 6  # Number of visible frames
     num_rollout = 16  # Number of rollout frames
     frame_step = 1  # Stepsize when observing frames

@@ -61,7 +61,7 @@ class Trainer:
             pred_loss += cur_df * \
                 loss(preds[:, delta_t], future_labels[:, delta_t])
             if delta_t < self.config.num_rollout - 1:
-                delta_pred_loss += cur_df * 10 * loss(delta_xy_preds[:, delta_t],
+                delta_pred_loss += cur_df * 6 * loss(delta_xy_preds[:, delta_t],
                                                       delta_xy_labels[:, delta_t])
             cur_df *= df
 
